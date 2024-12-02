@@ -1,6 +1,22 @@
 [profile.default]
-src = "src"
-out = "out"
-libs = ["lib"]
+build_info = true
+extra_output = ["storageLayout"]
+libs = ['lib']
+out = 'out'
+solc = "0.8.22"
+src = 'src'
+unchecked_cheatcode_artifacts = true
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[profile.networks.fuji]
+chain_id = 43113
+rpc_url = "https://api.avax-test.network/ext/bc/C/rpc"
+
+[profile.networks.avax]
+chain_id = 43114
+rpc_url = "https://api.avax.network/ext/bc/C/rpc"
+
+[rpc_endpoints]
+axax = "https://api.avax.network/ext/bc/C/rpc"
+fuji = "https://api.avax-test.network/ext/bc/C/rpc"
+
+# See more config options https://github.com/foundry-rs/foundry/tree/master/config

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -36,6 +36,11 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
     event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedAssets);
+    /// @custom:oz-upgrades-unsafe-allow constructor
+
+    constructor() {
+        _disableInitializers();
+    }
 
     /// @notice Initializer function (replaces constructor for upgradeable contracts)
     /// @param admin The admin address for the contract.

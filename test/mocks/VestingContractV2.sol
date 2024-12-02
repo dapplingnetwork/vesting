@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.22;
 
-import {VestingContract} from "../../src/VestingContract.sol";
+import {VestingContract} from "../../contracts/VestingContract.sol";
 
 /// @custom:oz-upgrades-from VestingContract
 contract VestingContractV2 is VestingContract {
