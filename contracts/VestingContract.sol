@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "forge-std/console.sol";
 
 interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
@@ -74,9 +75,11 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 endTime = startTime + (intervalDuration * totalIntervals);
         uint256 cliffTime = startTime + cliffDuration;
 
-        // Deposit GGP into Seafi Vault
+        token.transferFrom(msg.sender, address(this), totalAmount);
+
         token.approve(address(seafiVault), totalAmount);
         uint256 shares = seafiVault.deposit(totalAmount, address(this));
+
         require(shares > 0, "Vault deposit failed");
 
         vesting.totalShares = shares;

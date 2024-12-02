@@ -42,6 +42,35 @@ contract VestingContractTest is Test {
 
         // Test re-initialization should revert
         vm.expectRevert();
-        vestingContract.initialize(owner, address(ggpVaultMock), address(ggpTokenMock));
+        vesting.initialize(owner, address(ggpVaultMock), address(ggpTokenMock));
+        uint256 THREE_MONTHS = 7776000;
+
+        // vm.expectRevert();
+        // vesting.stakeOnBehalfOf(randomUser1, 1000e18, 0, THREE_MONTHS, 16);
+
+        ggpTokenMock.approve(address(vesting), 1000e18);
+
+        uint256 intervals = 16;
+        vesting.stakeOnBehalfOf(randomUser1, 1000e18, 0, THREE_MONTHS, intervals);
+        uint256 releasableShares = vesting.getReleasableShares(randomUser1);
+        assertEq(releasableShares, 0, "Releasable shares for randomUser1 should be 0");
+
+        vm.startPrank(randomUser1);
+        vm.expectRevert();
+        vesting.claim();
+
+        vm.warp(block.timestamp + THREE_MONTHS - 1);
+        assertEq(vesting.getReleasableShares(randomUser1), 0, "Releasable shares for randomUser1 should be 0");
+        vm.expectRevert();
+        vesting.claim();
+
+        vm.warp(block.timestamp + THREE_MONTHS);
+
+        assertEq(
+            vesting.getReleasableShares(randomUser1), 1000e18 / 16, "Releasable shares for randomUser1 should be 0"
+        );
+        vm.stopPrank();
+        vesting.cancelVesting(randomUser1);
+        assertEq(vesting.getReleasableShares(randomUser1), 0, "Releasable shares for randomUser1 should be 0");
     }
 }
