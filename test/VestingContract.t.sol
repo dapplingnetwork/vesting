@@ -51,7 +51,7 @@ contract VestingContractTest is Test {
         ggpTokenMock.approve(address(vesting), 1000e18);
 
         uint256 intervals = 16;
-        vesting.stakeOnBehalfOf(randomUser1, 1000e18, 0, THREE_MONTHS, intervals);
+        vesting.stakeOnBehalfOf(randomUser1, 1000e18, 0, 0, THREE_MONTHS, intervals);
         uint256 releasableShares = vesting.getReleasableShares(randomUser1);
         assertEq(releasableShares, 0, "Releasable shares for randomUser1 should be 0");
 

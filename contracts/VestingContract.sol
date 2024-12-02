@@ -22,6 +22,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     struct Vesting {
         uint256 totalShares; // xGGP shares deposited in the vault
         uint256 releasedShares; // xGGP shares redeemed so far
+        uint256 vestedAmount; // Amount of GGP already vested
         uint256 startTime; // Vesting start time
         uint256 endTime; // Vesting end time
         uint256 cliffTime; // Cliff period
@@ -61,12 +62,14 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     function stakeOnBehalfOf(
         address beneficiary,
         uint256 totalAmount, // GGP to be deposited
+        uint256 vestedAmount, // GGP already vested
         uint256 cliffDuration,
         uint256 intervalDuration,
         uint256 totalIntervals
     ) external onlyRole(VESTING_MANAGER_ROLE) {
         require(totalAmount > 0, "Amount must be greater than zero");
         require(totalIntervals > 0, "Intervals must be greater than zero");
+        require(vestedAmount <= totalAmount, "Vested amount cannot exceed total amount");
 
         Vesting storage vesting = vestingInfo[beneficiary];
         require(!vesting.isActive, "Existing vesting already active");
@@ -77,12 +80,13 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         token.transferFrom(msg.sender, address(this), totalAmount);
 
-        token.approve(address(seafiVault), totalAmount);
-        uint256 shares = seafiVault.deposit(totalAmount, address(this));
+        token.approve(address(seafiVault), totalAmount - vestedAmount);
+        uint256 shares = seafiVault.deposit(totalAmount - vestedAmount, address(this));
 
         require(shares > 0, "Vault deposit failed");
 
         vesting.totalShares = shares;
+        vesting.vestedAmount = vestedAmount;
         vesting.startTime = startTime;
         vesting.endTime = endTime;
         vesting.cliffTime = cliffTime;
@@ -98,15 +102,22 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         require(block.timestamp >= vesting.cliffTime, "Cliff period not reached");
 
         uint256 releasableShares = getReleasableShares(msg.sender);
-        require(releasableShares > 0, "No shares available for release");
+        uint256 releasableAssets;
 
-        vesting.releasedShares += releasableShares;
+        // Include already vested amount if it has not been claimed
+        if (vesting.vestedAmount > 0) {
+            releasableAssets = vesting.vestedAmount;
+            vesting.vestedAmount = 0; // Mark as claimed
+        }
 
-        // Redeem xGGP shares for GGP
-        uint256 redeemedAssets = seafiVault.redeem(releasableShares, msg.sender, address(this));
-        require(redeemedAssets > 0, "Vault redemption failed");
+        if (releasableShares > 0) {
+            releasableAssets += seafiVault.redeem(releasableShares, msg.sender, address(this));
+            vesting.releasedShares += releasableShares;
+        }
 
-        emit Claimed(msg.sender, redeemedAssets);
+        require(releasableAssets > 0, "No assets available for release");
+
+        emit Claimed(msg.sender, releasableAssets);
     }
 
     function cancelVesting(address beneficiary) external onlyRole(VESTING_MANAGER_ROLE) {
