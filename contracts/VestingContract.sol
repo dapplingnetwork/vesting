@@ -120,20 +120,33 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         emit Claimed(msg.sender, releasableAssets);
     }
 
-    function cancelVesting(address beneficiary) external onlyRole(VESTING_MANAGER_ROLE) {
+    function cancelVesting(address beneficiary) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Vesting storage vesting = vestingInfo[beneficiary];
         require(vesting.isActive, "Vesting not active");
 
+        // Calculate remaining shares and vested GGP
         uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
-        require(remainingShares > 0, "No remaining shares to withdraw");
+        uint256 vestedAmount = vesting.vestedAmount;
 
+        require(remainingShares > 0 || vestedAmount > 0, "No assets to withdraw");
+
+        // Mark vesting as inactive
         vesting.isActive = false;
 
-        // Redeem remaining xGGP shares for GGP
-        uint256 refundedAssets = seafiVault.redeem(remainingShares, msg.sender, address(this));
-        require(refundedAssets > 0, "Vault redemption failed");
+        uint256 refundedAssets = 0;
 
-        emit VestingCancelled(beneficiary, remainingShares, refundedAssets);
+        // Redeem remaining xGGP shares from the vault for GGP
+        if (remainingShares > 0) {
+            refundedAssets = seafiVault.redeem(remainingShares, msg.sender, address(this));
+            require(refundedAssets > 0, "Vault redemption failed");
+        }
+
+        // Transfer vested GGP from the contract to the admin
+        if (vestedAmount > 0) {
+            require(token.transfer(msg.sender, vestedAmount), "Vested GGP transfer failed");
+        }
+
+        emit VestingCancelled(beneficiary, remainingShares, refundedAssets + vestedAmount);
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {
