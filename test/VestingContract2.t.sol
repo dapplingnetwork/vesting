@@ -198,7 +198,7 @@ function testMultipleBeneficiaries() public {
 
     uint256 totalAmount2 = 2_000 ether;
     uint256 vestedAmount2 = 0 ether;
-    uint256 cliffDuration2 = 180 days;
+    uint256 cliffDuration2 = 0 days;
     uint256 intervalDuration2 = 180 days;
     uint256 totalIntervals2 = 8;
 
@@ -346,6 +346,236 @@ function testStakeOnBehalfOf_CliffPeriod() public {
     assertEq(actualVestedAmountAfterClaim, 0, "Vested amount should be zero after claiming");
 }
 
+
+function testCliffBehavior() public {
+    address beneficiary = address(0x4);
+
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 180 days;
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake for the beneficiary
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Validate initial state
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(actualVestedAmount, vestedAmount, "Incorrect initial vested amount");
+    assertEq(isActive, true, "Vesting should be active");
+    assertEq(cliffTime, startTime + cliffDuration, "Incorrect cliff time");
+
+    // Test before the cliff period
+    vm.warp(cliffTime - 1);
+    uint256 releasableSharesBeforeCliff = vestingContract.getReleasableShares(beneficiary);
+    assertEq(releasableSharesBeforeCliff, 0, "No shares should be releasable before the cliff");
+
+    // Test at the cliff period
+    vm.warp(cliffTime);
+    uint256 releasableSharesAtCliff = vestingContract.getReleasableShares(beneficiary);
+    uint256 intervalsElapsedAtCliff = cliffDuration / intervalDuration; // How many intervals have elapsed at the cliff
+    uint256 expectedSharesAtCliff = (totalAmount * intervalsElapsedAtCliff) / totalIntervals;
+    assertEq(releasableSharesAtCliff, expectedSharesAtCliff, "Incorrect shares releasable at the cliff");
+
+    // Test claiming at the cliff
+    vm.prank(beneficiary);
+    vestingContract.claim();
+    (
+        uint256 totalSharesAfterCliff,
+        uint256 releasedSharesAfterCliff,
+        uint256 actualVestedAmountAfterCliff,
+        uint256 startTimeAfterCliff,
+        uint256 endTimeAfterCliff,
+        uint256 cliffTimeAfterCliff,
+        uint256 vestingIntervalsAfterCliff,
+        bool isActiveAfterCliff
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(
+        releasedSharesAfterCliff,
+        releasableSharesAtCliff,
+        "Released shares should match the releasable shares at the cliff"
+    );
+    assertEq(actualVestedAmountAfterCliff, 0, "Vested amount should remain unchanged after claiming");
+    assertEq(isActiveAfterCliff, true, "Vesting should remain active after claiming");
+
+    // Test between cliff and next interval
+    vm.warp(cliffTime + intervalDuration / 2);
+    uint256 releasableSharesMidInterval = vestingContract.getReleasableShares(beneficiary);
+    assertEq(releasableSharesMidInterval, 0, "No additional shares should unlock mid-interval");
+
+    // Test at the next interval
+    vm.warp(cliffTime + intervalDuration);
+    uint256 releasableSharesNextInterval = vestingContract.getReleasableShares(beneficiary);
+    uint256 expectedSharesNextInterval = (totalAmount * (intervalsElapsedAtCliff + 1)) / totalIntervals;
+
+    assertEq(
+        releasableSharesNextInterval,
+        expectedSharesNextInterval - releasedSharesAfterCliff,
+        "Incorrect shares releasable at the next interval"
+    );
+
+    // Claim at the next interval
+    vm.prank(beneficiary);
+    vestingContract.claim();
+    (
+        uint256 totalSharesAfterNextInterval,
+        uint256 releasedSharesAfterNextInterval,
+        uint256 actualVestedAmountAfterNextInterval,
+        uint256 startTimeAfterNextInterval,
+        uint256 endTimeAfterNextInterval,
+        uint256 cliffTimeAfterNextInterval,
+        uint256 vestingIntervalsAfterNextInterval,
+        bool isActiveAfterNextInterval
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(
+        releasedSharesAfterNextInterval,
+        expectedSharesNextInterval,
+        "Released shares should match the expected shares at the next interval"
+    );
+    assertEq(actualVestedAmountAfterNextInterval, 0, "Vested amount should remain unchanged after the second claim");
+    assertEq(isActiveAfterNextInterval, true, "Vesting should remain active after the second claim");
+
+    // Test at the final interval
+    vm.warp(endTime);
+    uint256 releasableSharesFinalInterval = vestingContract.getReleasableShares(beneficiary);
+    assertEq(
+        releasableSharesFinalInterval,
+        totalAmount - releasedSharesAfterNextInterval,
+        "Incorrect shares releasable at the final interval"
+    );
+
+    // Claim at the final interval
+    vm.prank(beneficiary);
+    vestingContract.claim();
+    (
+        uint256 totalSharesFinal,
+        uint256 releasedSharesFinal,
+        uint256 actualVestedAmountFinal,
+        uint256 startTimeFinal,
+        uint256 endTimeFinal,
+        uint256 cliffTimeFinal,
+        uint256 vestingIntervalsFinal,
+        bool isActiveFinal
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedSharesFinal, totalAmount, "All shares should be released at the end of vesting");
+}
+
+function testNoCliffBehavior() public {
+    address beneficiary = address(0x5);
+
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake for the beneficiary
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Validate initial state
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(cliffTime, startTime, "Cliff time should match start time with no cliff");
+    assertEq(isActive, true, "Vesting should be active");
+
+    // Test at the first interval
+    vm.warp(startTime + intervalDuration);
+    uint256 releasableSharesFirstInterval = vestingContract.getReleasableShares(beneficiary);
+    uint256 expectedSharesFirstInterval = (totalAmount * 1) / totalIntervals;
+    assertEq(releasableSharesFirstInterval, expectedSharesFirstInterval, "Incorrect shares for the first interval");
+
+    // Claim at the first interval
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    (
+        uint256 totalSharesAfterFirstClaim,
+        uint256 releasedSharesAfterFirstClaim,
+        uint256 actualVestedAmountAfterFirstClaim,
+        uint256 startTimeAfterFirstClaim,
+        uint256 endTimeAfterFirstClaim,
+        uint256 cliffTimeAfterFirstClaim,
+        uint256 vestingIntervalsAfterFirstClaim,
+        bool isActiveAfterFirstClaim
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(
+        releasedSharesAfterFirstClaim,
+        expectedSharesFirstInterval,
+        "Released shares should match expected shares after the first claim"
+    );
+    assertEq(isActiveAfterFirstClaim, true, "Vesting should remain active after the first claim");
+
+    // Test at the final interval
+    vm.warp(endTime);
+    uint256 releasableSharesFinalInterval = vestingContract.getReleasableShares(beneficiary);
+    assertEq(
+        releasableSharesFinalInterval,
+        totalAmount - releasedSharesAfterFirstClaim,
+        "Incorrect shares for the final interval"
+    );
+
+    // Claim all remaining shares
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    (
+        uint256 totalSharesFinal,
+        uint256 releasedSharesFinal,
+        uint256 actualVestedAmountFinal,
+        uint256 startTimeFinal,
+        uint256 endTimeFinal,
+        uint256 cliffTimeFinal,
+        uint256 vestingIntervalsFinal,
+        bool isActiveFinal
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedSharesFinal, totalAmount, "All shares should be released at the end of vesting");
+}
 
 
 }
