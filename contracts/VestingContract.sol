@@ -10,7 +10,6 @@ interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
     function approve(address spender, uint256 amount) external returns (bool);
     function transfer(address recipient, uint256 amount) external returns (bool);
-
 }
 
 interface IGGPVault {
@@ -37,11 +36,12 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     IGGPVault public seafiVault; // The vault to deposit/redeem xGGP
     IERC20 public token; // The ERC20 token being deposited
 
+
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
     event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedAssets);
-    /// @custom:oz-upgrades-unsafe-allow constructor
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -59,6 +59,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         seafiVault = IGGPVault(vault);
         token = IERC20(_token);
+
     }
 
     function stakeOnBehalfOf(
@@ -72,6 +73,13 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         require(totalAmount > 0, "Amount must be greater than zero");
         require(totalIntervals > 0, "Intervals must be greater than zero");
         require(vestedAmount <= totalAmount, "Vested amount cannot exceed total amount");
+        require(cliffDuration <= intervalDuration * totalIntervals, "Cliff duration exceeds total vesting period");
+
+        if (cliffDuration > 0) {
+            require(vestedAmount == 0, "Vested amount must be zero if cliff duration is specified");
+        }
+
+        require(cliffDuration == 0 || cliffDuration >= intervalDuration, "Cliff duration must be >= interval duration");
 
         Vesting storage vesting = vestingInfo[beneficiary];
         require(!vesting.isActive, "Existing vesting already active");
@@ -98,6 +106,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         emit StakedOnBehalf(beneficiary, shares, startTime, endTime);
     }
 
+    // Other contract functions remain unchanged...
     function claim() external {
         Vesting storage vesting = vestingInfo[msg.sender];
         require(vesting.isActive, "No active vesting");
@@ -106,7 +115,6 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 releasableShares = getReleasableShares(msg.sender);
         uint256 releasableAssets;
 
-        // Include already vested amount if it has not been claimed
         if (vesting.vestedAmount > 0) {
             releasableAssets = vesting.vestedAmount;
             vesting.vestedAmount = 0; // Mark as claimed
@@ -126,24 +134,20 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         Vesting storage vesting = vestingInfo[beneficiary];
         require(vesting.isActive, "Vesting not active");
 
-        // Calculate remaining shares and vested GGP
         uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
         uint256 vestedAmount = vesting.vestedAmount;
 
         require(remainingShares > 0 || vestedAmount > 0, "No assets to withdraw");
 
-        // Mark vesting as inactive
         vesting.isActive = false;
 
         uint256 refundedAssets = 0;
 
-        // Redeem remaining xGGP shares from the vault for GGP
         if (remainingShares > 0) {
             refundedAssets = seafiVault.redeem(remainingShares, msg.sender, address(this));
             require(refundedAssets > 0, "Vault redemption failed");
         }
 
-        // Transfer vested GGP from the contract to the admin
         if (vestedAmount > 0) {
             require(token.transfer(msg.sender, vestedAmount), "Vested GGP transfer failed");
         }
