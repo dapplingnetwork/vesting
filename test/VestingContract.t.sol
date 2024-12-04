@@ -51,7 +51,20 @@ contract VestingContractTest is Test {
         ggpTokenMock.approve(address(vesting), 1000e18);
 
         uint256 intervals = 16;
-        vesting.stakeOnBehalfOf(randomUser1, 1000e18, 0, 0, THREE_MONTHS, intervals);
+        uint256 totalVestAmount = 1000e18;
+        assertEq(ggpTokenMock.balanceOf(address(vesting)), 0, "Releasable shares for randomUser1 should be 0");
+
+        uint256 adminTokenAmountStarting = ggpTokenMock.balanceOf(address(this));
+
+        vesting.stakeOnBehalfOf(randomUser1, totalVestAmount, 0, 0, THREE_MONTHS, intervals);
+        assertEq(
+            ggpTokenMock.balanceOf(address(this)),
+            adminTokenAmountStarting - totalVestAmount,
+            "Releasable shares for randomUser1 should be 0"
+        );
+
+        assertEq(ggpTokenMock.balanceOf(address(vesting)), 0, "Releasable shares for randomUser1 should be 0");
+
         uint256 releasableShares = vesting.getReleasableShares(randomUser1);
         assertEq(releasableShares, 0, "Releasable shares for randomUser1 should be 0");
 
@@ -70,7 +83,14 @@ contract VestingContractTest is Test {
             vesting.getReleasableShares(randomUser1), 1000e18 / 16, "Releasable shares for randomUser1 should be 0"
         );
         vm.stopPrank();
+
         vesting.cancelVesting(randomUser1);
+
+        assertEq(
+            ggpTokenMock.balanceOf(address(this)), adminTokenAmountStarting, "Releasable shares for randomUser1 should be 0"
+        ); 
+        assertEq(ggpTokenMock.balanceOf(address(vesting)), 0, "Releasable shares for randomUser1 should be 0");
+
         assertEq(vesting.getReleasableShares(randomUser1), 0, "Releasable shares for randomUser1 should be 0");
     }
 }
