@@ -90,8 +90,8 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         token.transferFrom(msg.sender, address(this), totalAmount);
 
-        token.approve(address(seafiVault), totalAmount - vestedAmount);
-        uint256 shares = seafiVault.deposit(totalAmount - vestedAmount, address(this));
+        token.approve(address(seafiVault), totalAmount);
+        uint256 shares = seafiVault.deposit(totalAmount, address(this));
 
         require(shares > 0, "Vault deposit failed");
 

@@ -4,10 +4,12 @@ pragma solidity ^0.8.22;
 import {Test} from "forge-std/Test.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import {VestingContract} from "../contracts/VestingContract.sol";
+import {VestingContractV2} from "./mocks/VestingContractV2.sol";
 import {GGPVaultMock} from "./mocks/GGPVaultMock.sol";
+
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 
-contract VestingContractTest is Test {
+contract VestingContractFullTest is Test {
     VestingContract public vestingContract;
     GGPVaultMock public ggpVaultMock;
     ERC20Mock public ggpTokenMock;
@@ -81,23 +83,41 @@ contract VestingContractTest is Test {
         assertEq(isActive, true, "Vesting should be active");
     }
 
-    function testStakeOnBehalfOf_InvalidInputs() public {
-        uint256 totalAmount = 1_000 ether;
+  function testStakeOnBehalfOf_InvalidInputs() public {
+    uint256 totalAmount = 1_000 ether;
 
-        vm.prank(vestingManager);
-        ggpTokenMock.approve(address(vestingContract), totalAmount);
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
 
-        vm.startPrank(vestingManager);
+    vm.startPrank(vestingManager);
 
-        vm.expectRevert("Amount must be greater than zero");
-        vestingContract.stakeOnBehalfOf(beneficiary, 0, 0, 0, 90 days, 4);
+    // Case 1: Amount must be greater than zero
+    vm.expectRevert("Amount must be greater than zero");
+    vestingContract.stakeOnBehalfOf(beneficiary, 0, 0, 0, 90 days, 4);
 
-        vm.expectRevert("Intervals must be greater than zero");
-        vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, 0, 0, 90 days, 0);
+    // Case 2: Intervals must be greater than zero
+    vm.expectRevert("Intervals must be greater than zero");
+    vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, 0, 0, 90 days, 0);
 
-        vm.expectRevert("Vested amount cannot exceed total amount");
-        vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, totalAmount + 1 ether, 0, 90 days, 4);
-    }
+    // Case 3: Vested amount cannot exceed total amount
+    vm.expectRevert("Vested amount cannot exceed total amount");
+    vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, totalAmount + 1 ether, 0, 90 days, 4);
+
+    // Case 4: Cliff duration exceeds total vesting period
+    vm.expectRevert("Cliff duration exceeds total vesting period");
+    vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, 0, 365 days * 5, 90 days, 4);
+
+    // Case 5: Cliff duration is non-zero but vested amount is not zero
+    vm.expectRevert("Vested amount must be zero if cliff duration is specified");
+    vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, 1 ether, 90 days, 90 days, 4);
+
+    // Case 6: Cliff duration must be >= interval duration
+    vm.expectRevert("Cliff duration must be >= interval duration");
+    vestingContract.stakeOnBehalfOf(beneficiary, totalAmount, 0, 30 days, 90 days, 4);
+
+    vm.stopPrank();
+}
+
 function testStakeOnBehalfOf_ExistingVesting() public {
     uint256 totalAmount = 1_000 ether;
     uint256 vestedAmount = 0 ether;
@@ -576,6 +596,400 @@ function testNoCliffBehavior() public {
 
     assertEq(releasedSharesFinal, totalAmount, "All shares should be released at the end of vesting");
 }
+
+function testClaimBeforeCliff() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 180 days;
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to a time before the cliff
+    vm.warp(block.timestamp + cliffDuration - 1);
+
+    // Attempt to claim before the cliff period
+    vm.prank(beneficiary);
+    vm.expectRevert("Cliff period not reached");
+    vestingContract.claim();
+}
+
+function testClaimAtCliff() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 180 days;
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to the cliff
+    vm.warp(block.timestamp + cliffDuration);
+
+    // Expected shares at the cliff
+    uint256 intervalsElapsed = cliffDuration / intervalDuration;
+    uint256 expectedSharesAtCliff = (totalAmount * intervalsElapsed) / totalIntervals;
+
+    // Claim at the cliff
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Validate the vesting state after the claim
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedShares, expectedSharesAtCliff, "Incorrect released shares after claim at the cliff");
+    assertEq(actualVestedAmount, 0, "Incorrect vested amount after claim at the cliff");
+    assertEq(isActive, true, "Vesting should remain active after claiming at the cliff");
+}
+
+function testClaimAtInterval() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to the second interval
+    vm.warp(block.timestamp + intervalDuration * 2);
+
+    // Expected shares at the second interval
+    uint256 expectedShares = (totalAmount * 2) / totalIntervals;
+
+    // Claim
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Validate the vesting state after the claim
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedShares, expectedShares, "Incorrect released shares after claim at the second interval");
+    assertEq(actualVestedAmount, 0, "Incorrect vested amount after claim at the second interval");
+    assertEq(isActive, true, "Vesting should remain active after claiming at the second interval");
+}
+
+function testFullClaimAtEnd() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to the end of the vesting period
+    vm.warp(block.timestamp + intervalDuration * totalIntervals);
+
+    // Claim all remaining shares
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Validate the vesting state after the claim
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+}
+
+function testUnauthorizedClaim() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to an interval
+    vm.warp(block.timestamp + intervalDuration);
+
+    // Attempt to claim from an unauthorized address
+    vm.prank(address(0x6)); // Not the beneficiary
+    vm.expectRevert("No active vesting");
+    vestingContract.claim();
+}
+
+function testPartialClaimAcrossIntervals() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to the first interval and claim
+    vm.warp(block.timestamp + intervalDuration);
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Warp to the second interval and claim again
+    vm.warp(block.timestamp + intervalDuration);
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Validate the state after two claims
+    uint256 expectedSharesAfterTwoIntervals = (totalAmount * 2) / totalIntervals;
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedShares, expectedSharesAfterTwoIntervals, "Incorrect released shares after two claims");
+    assertEq(isActive, true, "Vesting should remain active after two claims");
+}
+
+function testPreventOverclaimAfterVestingEnds() public {
+    uint256 totalAmount = 1_000 ether;
+    uint256 vestedAmount = 0 ether;
+    uint256 cliffDuration = 0; // No cliff
+    uint256 intervalDuration = 90 days;
+    uint256 totalIntervals = 4;
+
+    // Approve and stake
+    vm.prank(vestingManager);
+    ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+    vm.prank(vestingManager);
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        totalAmount,
+        vestedAmount,
+        cliffDuration,
+        intervalDuration,
+        totalIntervals
+    );
+
+    // Warp to the end of the vesting period
+    vm.warp(block.timestamp + intervalDuration * totalIntervals);
+
+    // Claim all remaining shares
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    // Validate the vesting state after the full claim
+    (
+        uint256 totalShares,
+        uint256 releasedShares,
+        uint256 actualVestedAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 cliffTime,
+        uint256 vestingIntervals,
+        bool isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedShares, totalAmount, "All shares should be released after the final claim");
+
+    // Attempt to claim again after all shares have been released
+    vm.prank(beneficiary);
+    vm.expectRevert();
+    vestingContract.claim();
+
+    // Validate that no additional shares were released
+    (
+        totalShares,
+        releasedShares,
+        actualVestedAmount,
+        startTime,
+        endTime,
+        cliffTime,
+        vestingIntervals,
+        isActive
+    ) = vestingContract.vestingInfo(beneficiary);
+
+    assertEq(releasedShares, totalAmount, "Released shares should not exceed the total amount allocated");
+}
+
+
+function testAccessControlForRoles() public {
+    bytes32 vestingManagerRole = vestingContract.VESTING_MANAGER_ROLE();
+    bytes32 defaultAdminRole = vestingContract.DEFAULT_ADMIN_ROLE();
+
+    // Ensure owner has admin role
+    assertTrue(vestingContract.hasRole(defaultAdminRole, owner), "Owner should have admin role");
+
+    // Ensure vestingManager has the vesting manager role
+    assertTrue(vestingContract.hasRole(vestingManagerRole, vestingManager), "VestingManager should have vesting manager role");
+
+    // Unauthorized address trying to call `stakeOnBehalfOf`
+    vm.prank(address(0x6)); // Unauthorized address
+    vm.expectRevert();
+    vestingContract.stakeOnBehalfOf(
+        beneficiary,
+        1_000 ether,
+        0,
+        180 days,
+        90 days,
+        4
+    );
+
+    // Unauthorized address trying to call `cancelVesting`
+    vm.prank(address(0x6)); // Unauthorized address
+    vm.expectRevert();
+    vestingContract.cancelVesting(beneficiary);
+
+    // Grant vesting manager role from admin
+    vm.prank(owner);
+    vestingContract.grantRole(vestingManagerRole, address(0x7));
+    assertTrue(vestingContract.hasRole(vestingManagerRole, address(0x7)), "New address should have vesting manager role");
+
+    // Revoke vesting manager role from admin
+    vm.prank(owner);
+    vestingContract.revokeRole(vestingManagerRole, vestingManager);
+    assertFalse(vestingContract.hasRole(vestingManagerRole, vestingManager), "VestingManager role should be revoked");
+
+    // Unauthorized address trying to grant roles
+    vm.prank(address(0x6)); // Unauthorized address
+    vm.expectRevert();
+    vestingContract.grantRole(vestingManagerRole, address(0x8));
+
+    // Unauthorized address trying to revoke roles
+    vm.prank(address(0x6)); // Unauthorized address
+    vm.expectRevert();
+    vestingContract.revokeRole(vestingManagerRole, address(0x7));
+
+    // Admin renouncing their own role
+    vm.prank(owner);
+    vestingContract.renounceRole(defaultAdminRole, owner);
+    assertFalse(vestingContract.hasRole(defaultAdminRole, owner), "Owner should have renounced admin role");
+}
+
+
+function testUpgrade() public {
+    // Get the implementation address before the upgrade
+    address implAddressV1 = Upgrades.getImplementationAddress(address(vestingContract));
+
+    // Ensure the original contract does not have the new method
+    vm.expectRevert();
+    VestingContractV2(address(vestingContract)).newMethod();
+
+    // Deploy the new implementation and upgrade the proxy
+    Upgrades.upgradeProxy(
+        address(vestingContract),
+        "VestingContractV2.sol",
+        abi.encodeCall(VestingContractV2.newMethod, ())
+    );
+
+    // Get the implementation address after the upgrade
+    address implAddressV2 = Upgrades.getImplementationAddress(address(vestingContract));
+
+    // Assert that the implementation address has changed
+    assertFalse(implAddressV1 == implAddressV2, "Implementation address should have changed after upgrade");
+
+    // Interact with the upgraded contract
+    VestingContractV2 upgradedContract = VestingContractV2(address(vestingContract));
+
+    // Verify the new method works
+    string memory result = upgradedContract.newMethod();
+    assertEq(result, "meow", "The new method should return 'meow'");
+}
+
 
 
 }
