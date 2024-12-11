@@ -42,7 +42,7 @@ contract AuditVestingContractTest is Test {
     }
 
     function test_CanClaimEvenWhenVestingEndTimeExceeds() public {
-        _vest();
+        _vest(beneficiary, 1_000 ether);
         (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
         vm.warp(block.timestamp + endTimeAfterClaim + 1000);
 
@@ -51,7 +51,7 @@ contract AuditVestingContractTest is Test {
     }
 
     function test_RevertsIfSeafiVaultReverts() public {
-        _vest();
+        _vest(beneficiary, 1_000 ether);
         (,,,,, uint256 cliffTime,,) = vestingContract.vestingInfo(beneficiary);
         vm.warp(block.timestamp + cliffTime);
 
@@ -72,39 +72,31 @@ contract AuditVestingContractTest is Test {
     }
 
     function test_DisproportionalReleasableShares() public {
-        _vest();
-        (
-            /* uint256 totalSharesAfterClaim */
-            ,
-            /*  uint256 releasedSharesAfterClaim */
-            ,
-            /* uint256 actualVestedAmountAfterClaim */
-            ,
-            /* uint256 startTimeAfterClaim */
-            ,
-            uint256 endTimeAfterClaim,
-            /* uint256 cliffTimeAfterClaim */
-            ,
-            /* uint256 vestingIntervalsAfterClaim */
-            ,
-            /* bool isActiveAfterClaim */
-        ) = vestingContract.vestingInfo(beneficiary);
+        _vest(beneficiary, 1_000 ether);
+        _vest(makeAddr("beneficiary2"), 2_000 ether);
+        _vest(makeAddr("beneficiary3"), 2_000 ether);
+        _vest(makeAddr("beneficiary4"), 2_000 ether);
+
+        (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
 
         vm.warp(block.timestamp + endTimeAfterClaim);
         uint256 maxReleasableShares = vestingContract.getReleasableShares(beneficiary);
-        vm.warp(block.timestamp + 2 * 365 days);
+        vm.warp(block.timestamp + 365 days);
         assertLt(endTimeAfterClaim, block.timestamp);
 
         uint256 releasableShares = vestingContract.getReleasableShares(beneficiary);
-        console.log("maxReleasableShares:", maxReleasableShares, "releasableShares", releasableShares);
+
         assert(maxReleasableShares < releasableShares);
+
+        vm.prank(beneficiary);
+        vestingContract.claim();
     }
 
-    function _vest() internal {
-        uint256 totalAmount = 1_000 ether;
+    function _vest(address _beneficiary, uint256 totalAmount) internal {
+        // uint256 totalAmount = 1_000 ether;
         uint256 vestedAmount = 0 ether;
-        uint256 cliffDuration = 180 days;
-        uint256 intervalDuration = 90 days;
+        uint256 cliffDuration = 60 days;
+        uint256 intervalDuration = 30 days;
         uint256 totalIntervals = 4;
 
         // Approve and stake
@@ -113,7 +105,7 @@ contract AuditVestingContractTest is Test {
 
         vm.prank(vestingManager);
         vestingContract.stakeOnBehalfOf(
-            beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
         );
     }
 }
