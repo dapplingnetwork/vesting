@@ -52,7 +52,43 @@ Limit `getReleasableShares` calculation until `endTime`.
 
 ## Low
 
-### [L-1]. floating `pragma` vulnerabilitiy
+### [L-1]. Unable to `VestingContract::cancelVesting` if vesting claimed
+
+**Description:** Vestings can be cancelled if there's enough funds to claim otherwise it reverts, not being possible to set the `isActive` state to false. Besides, it's not possible to start a new vesting if there's an active one.
+
+```javascript
+  function cancelVesting(address beneficiary) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    Vesting storage vesting = vestingInfo[beneficiary];
+
+    uint256 vestedAmount = vesting.vestedAmount;
+    uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
+
+    require(remainingShares > 0 || vestedAmount > 0, "No assets to withdraw");
+    //impl
+  }
+```
+
+**Impact:** Unable to initiate a new vesting process.
+
+**Proof of concept:**
+
+```javascript
+  function test_CannotCancelVestingOnceClaimed() public {
+    _vest(beneficiary, 1_000 ether);
+
+    vm.warp(block.timestamp + 365 days);
+
+    vm.prank(beneficiary);
+    vestingContract.claim();
+
+    vm.expectRevert(bytes("No assets to withdraw"));
+    vestingContract.cancelVesting(beneficiary);
+  }
+```
+
+---
+
+### [L-2]. floating `pragma` vulnerabilitiy
 
 **Description:** floating pragma version might introduce new feature that might alter the behavior of the contract
 
@@ -70,7 +106,7 @@ Use a specific version of solidity pragma instead of floating points
 +  pragma solidity 0.8.22;
 ```
 
-### [L-2]. The `getReleasableShares` function allows the yield calculation for vestings already expired.
+### [L-3]. The `getReleasableShares` function allows the yield calculation for vestings already expired.
 
 **Description:** affects the `claim` function. Also, users might get confused that if their vesting is not `cancelled` but `ended`, They will still assume as valid yield.
 

@@ -117,6 +117,18 @@ contract AuditVestingContractTest is Test {
         assertGe(endingGGPBalance, startingGGPBalance);
     }
 
+    function test_CannotCancelVestingOnceClaimed() public {
+        _vest(beneficiary, 1_000 ether);
+
+        vm.warp(block.timestamp + 365 days);
+
+        vm.prank(beneficiary);
+        vestingContract.claim();
+
+        vm.expectRevert(bytes("No assets to withdraw"));
+        vestingContract.cancelVesting(beneficiary);
+    }
+
     function _vest(address _beneficiary, uint256 totalAmount) internal {
         // uint256 totalAmount = 1_000 ether;
         uint256 vestedAmount = 0 ether;
