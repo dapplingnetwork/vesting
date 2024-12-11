@@ -92,6 +92,31 @@ contract AuditVestingContractTest is Test {
         vestingContract.claim();
     }
 
+    function test_GetsMaxYieldAfterEndTime() public {
+        _vest(beneficiary, 1_000 ether);
+        (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
+
+        vm.warp(block.timestamp + endTimeAfterClaim);
+        uint256 maxReleasableShares = vestingContract.getReleasableShares(beneficiary);
+
+        vm.warp(block.timestamp + 365 days);
+
+        uint256 releasableSharesAfter = vestingContract.getReleasableShares(beneficiary);
+
+        assertLe(maxReleasableShares, releasableSharesAfter, "Unexpected Releasable Shares");
+    }
+
+    function test_ClaimsMaxYieldAfterEndTime() public {
+        test_GetsMaxYieldAfterEndTime();
+        uint256 startingGGPBalance = ggpTokenMock.balanceOf(beneficiary);
+
+        vm.prank(beneficiary);
+        vestingContract.claim();
+
+        uint256 endingGGPBalance = ggpTokenMock.balanceOf(beneficiary);
+        assertGe(endingGGPBalance, startingGGPBalance);
+    }
+
     function _vest(address _beneficiary, uint256 totalAmount) internal {
         // uint256 totalAmount = 1_000 ether;
         uint256 vestedAmount = 0 ether;

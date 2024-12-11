@@ -164,19 +164,14 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {
-        //@gas mark as vesting as memory
         Vesting storage vesting = vestingInfo[beneficiary];
         if (block.timestamp < vesting.cliffTime || !vesting.isActive) {
             return 0;
         }
 
         uint256 totalTime = vesting.endTime - vesting.startTime;
-        uint256 timeElapsed = block.timestamp - vesting.startTime;
-        uint256 totalIntervals = vesting.vestingIntervals;
-        //@up If timeElapsed exceeds totalTime, totalUnlockedShares could become disproportionately high, leading to confusion.
-        //@gas totalUnlockedShares same as = (vesting.totalShares * timeElapsed  / totalTime);
-        uint256 totalUnlockedShares =
-            (vesting.totalShares * (timeElapsed * totalIntervals / totalTime)) / totalIntervals;
+        uint256 timeElapsed = block.timestamp > vesting.endTime ? totalTime : block.timestamp - vesting.startTime;
+        uint256 totalUnlockedShares = (vesting.totalShares * timeElapsed / totalTime);
         return totalUnlockedShares - vesting.releasedShares;
     }
 
