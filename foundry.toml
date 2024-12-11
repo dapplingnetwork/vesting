@@ -6,7 +6,7 @@ out = 'out'
 solc = "0.8.22"
 src = 'src'
 unchecked_cheatcode_artifacts = true
-
+viaIR = true
 [profile.networks.fuji]
 chain_id = 43113
 rpc_url = "https://api.avax-test.network/ext/bc/C/rpc"

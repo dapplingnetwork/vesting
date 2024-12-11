@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+//@audit use a specific solidity version
+
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
@@ -20,6 +22,7 @@ interface IGGPVault {
 contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgradeable {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
 
+    //@q saves single or all time vestings?: Single, once
     struct Vesting {
         uint256 totalShares; // xGGP shares deposited in the vault
         uint256 releasedShares; // xGGP shares redeemed so far
@@ -35,7 +38,6 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
     IGGPVault public seafiVault; // The vault to deposit/redeem xGGP
     IERC20 public token; // The ERC20 token being deposited
-
 
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
@@ -59,8 +61,9 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         seafiVault = IGGPVault(vault);
         token = IERC20(_token);
-
     }
+    //@audit function it's not aligned with gradually investment approach
+    //@q amount is invested after cliffDuration in chunks?
 
     function stakeOnBehalfOf(
         address beneficiary,
@@ -88,13 +91,16 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 endTime = startTime + (intervalDuration * totalIntervals);
         uint256 cliffTime = startTime + cliffDuration;
 
+        //@q GPP's are transfered from the multisig wallet, not from investor's holdings.
         token.transferFrom(msg.sender, address(this), totalAmount);
-
         token.approve(address(seafiVault), totalAmount);
+        //@up in case of deposit reverts
+
+        //@audit the receiver is the contract itself so GGP's holder won't own received xGGPs
         uint256 shares = seafiVault.deposit(totalAmount, address(this));
 
         require(shares > 0, "Vault deposit failed");
-
+        //@gas perform a single storage write
         vesting.totalShares = shares;
         vesting.vestedAmount = vestedAmount;
         vesting.startTime = startTime;
@@ -107,6 +113,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     }
 
     // Other contract functions remain unchanged...
+    //@audit claimable even when vesting exceeds its endTime
     function claim() external {
         Vesting storage vesting = vestingInfo[msg.sender];
         require(vesting.isActive, "No active vesting");
@@ -130,6 +137,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         emit Claimed(msg.sender, releasableAssets);
     }
 
+    //@q does canceling
     function cancelVesting(address beneficiary) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Vesting storage vesting = vestingInfo[beneficiary];
         require(vesting.isActive, "Vesting not active");
@@ -156,6 +164,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {
+        //@gas mark as vesting as memory
         Vesting storage vesting = vestingInfo[beneficiary];
         if (block.timestamp < vesting.cliffTime || !vesting.isActive) {
             return 0;
@@ -164,7 +173,8 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 totalTime = vesting.endTime - vesting.startTime;
         uint256 timeElapsed = block.timestamp - vesting.startTime;
         uint256 totalIntervals = vesting.vestingIntervals;
-
+        //@up If timeElapsed exceeds totalTime, totalUnlockedShares could become disproportionately high, leading to confusion.
+        //@gas totalUnlockedShares same as = (vesting.totalShares * timeElapsed  / totalTime);
         uint256 totalUnlockedShares =
             (vesting.totalShares * (timeElapsed * totalIntervals / totalTime)) / totalIntervals;
         return totalUnlockedShares - vesting.releasedShares;
