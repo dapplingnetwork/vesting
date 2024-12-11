@@ -111,13 +111,13 @@ Cache vesting in memory and perform a single storage write
 
 **Description:** the current formula for `totalUnlockedShares` contains more operations involved.
 
-````diff
+```diff
  function getReleasableShares(address beneficiary){
 -  uint256 totalUnlockedShares =
 -            (vesting.totalShares * (timeElapsed * totalIntervals / totalTime)) / totalIntervals;
 +  uint256 totalUnlockedShares = (vesting.totalShares * timeElapsed  / totalTime);
  }
-```****
+```
 
 # Denied-Findings
 
@@ -131,4 +131,3 @@ Cache vesting in memory and perform a single storage write
 - at `stakeOnBehalfOf`, beneficiaries might be `contracts`, can they force reentrancies on `deposit`?
   - No,OZ ERC4726 only performs `_update` balances on `GGPToken` address;
   - No, No Hooks executed on transfer
-````
