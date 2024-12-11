@@ -71,7 +71,7 @@ contract AuditVestingContractTest is Test {
         vestingContract.claim();
     }
 
-    function test_DisproportionalReleasableShares() public {
+    function test_CanClaimMoreThanExpected() public {
         _vest(beneficiary, 1_000 ether);
         _vest(makeAddr("beneficiary2"), 2_000 ether);
         _vest(makeAddr("beneficiary3"), 2_000 ether);
