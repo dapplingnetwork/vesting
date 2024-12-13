@@ -122,6 +122,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         if (vesting.vestedAmount > 0) {
             uint256 vestedShares = seafiVault.convertToShares(vesting.vestedAmount);
+            vesting.vestedAmount = 0;
             releasableShares += vestedShares;
         }
 
