@@ -6,7 +6,6 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "forge-std/console.sol";
 
 interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
@@ -17,12 +16,15 @@ interface IERC20 {
 interface IGGPVault {
     function deposit(uint256 assets, address receiver) external returns (uint256 shares);
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets);
+    function convertToShares(uint256 assets) public view virtual returns (uint256);
+    function convertToAssets(uint256 shares) public view virtual returns (uint256);
 }
 
 contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgradeable {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
 
     //@q saves single or all time vestings?: Single, once
+
     struct Vesting {
         uint256 totalShares; // xGGP shares deposited in the vault
         uint256 releasedShares; // xGGP shares redeemed so far
@@ -32,18 +34,23 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 cliffTime; // Cliff period
         uint256 vestingIntervals; // Number of intervals (e.g., 16 for 4 years quarterly)
         bool isActive; // Indicates if the vesting is active
+        bool vestAmountClaimed; // Indicates if the vestedAmount was claimed
     }
 
     mapping(address => Vesting) public vestingInfo; // beneficiary -> vesting details
+    uint256 withdrawShares;
 
     IGGPVault public seafiVault; // The vault to deposit/redeem xGGP
     IERC20 public token; // The ERC20 token being deposited
 
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
-    event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedAssets);
+    event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedShares);
+    event VestingCancelled2(address indexed beneficiary, uint256 remainingShares);
 
+    event Withdraw(uint256 assetsWithdrawn);
     /// @custom:oz-upgrades-unsafe-allow constructor
+
     constructor() {
         _disableInitializers();
     }
@@ -62,8 +69,6 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         seafiVault = IGGPVault(vault);
         token = IERC20(_token);
     }
-    //@audit function it's not aligned with gradually investment approach
-    //@q amount is invested after cliffDuration in chunks?
 
     function stakeOnBehalfOf(
         address beneficiary,
@@ -91,16 +96,12 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 endTime = startTime + (intervalDuration * totalIntervals);
         uint256 cliffTime = startTime + cliffDuration;
 
-        //@q GPP's are transfered from the multisig wallet, not from investor's holdings.
         token.transferFrom(msg.sender, address(this), totalAmount);
         token.approve(address(seafiVault), totalAmount);
-        //@up in case of deposit reverts
 
-        //@audit the receiver is the contract itself so GGP's holder won't own received xGGPs
         uint256 shares = seafiVault.deposit(totalAmount, address(this));
 
         require(shares > 0, "Vault deposit failed");
-        //@gas perform a single storage write
         vesting.totalShares = shares;
         vesting.vestedAmount = vestedAmount;
         vesting.startTime = startTime;
@@ -111,9 +112,8 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         emit StakedOnBehalf(beneficiary, shares, startTime, endTime);
     }
-
     // Other contract functions remain unchanged...
-    //@audit claimable even when vesting exceeds its endTime
+
     function claim() external {
         Vesting storage vesting = vestingInfo[msg.sender];
         require(vesting.isActive, "No active vesting");
@@ -122,9 +122,10 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 releasableShares = getReleasableShares(msg.sender);
         uint256 releasableAssets;
 
-        if (vesting.vestedAmount > 0) {
-            releasableAssets = vesting.vestedAmount;
-            vesting.vestedAmount = 0; // Mark as claimed
+        if (vesting.vestedAmount > 0 && !vesting.vestAmountClaimed) {
+            uint256 vestedShares = seafiVault.convertToShares(vesting.vestedAmount);
+            vesting.vestAmountClaimed = true; // Mark as claimed
+            releasableAssets = seafiVault.redeem(vestedShares, msg.sender, address(this));
         }
 
         if (releasableShares > 0) {
@@ -137,30 +138,35 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         emit Claimed(msg.sender, releasableAssets);
     }
 
-    //@q does canceling
+    // withdraws cumulated shares from canceled Vesting ones.
+    function withdraw() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 shares = withdrawShares;
+        require(shares > 0, "No shares available to withdraw");
+
+        uint256 assetsWithdrawn = seafiVault.redeem(shares, msg.sender, address(this));
+        require(assetsWithdrawn > 0, "Vault redemption failed");
+
+        withdrawShares -= shares;
+
+        emit Withdraw(assetsWithdrawn);
+    }
+
+    // Schedules the admin's shares to refund
     function cancelVesting(address beneficiary) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Vesting storage vesting = vestingInfo[beneficiary];
         require(vesting.isActive, "Vesting not active");
-
-        uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
-        uint256 vestedAmount = vesting.vestedAmount;
-
-        require(remainingShares > 0 || vestedAmount > 0, "No assets to withdraw");
-
         vesting.isActive = false;
 
-        uint256 refundedAssets = 0;
-
-        if (remainingShares > 0) {
-            refundedAssets = seafiVault.redeem(remainingShares, msg.sender, address(this));
-            require(refundedAssets > 0, "Vault redemption failed");
+        uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
+        //acrued yield at the time on cancel since the last claim
+        uint256 yield = getReleasableShares(vesting.beneficiary);
+        uint256 refundShares = vestingInfo.totalShares + yield;
+        if (vestingInfo.vestAmountClaimed) {
+            refundShares -= seafiVault.convertToShares(vesting.vestedAmount);
         }
 
-        if (vestedAmount > 0) {
-            require(token.transfer(msg.sender, vestedAmount), "Vested GGP transfer failed");
-        }
-
-        emit VestingCancelled(beneficiary, remainingShares, refundedAssets + vestedAmount);
+        withdrawShares += refundShares;
+        emit VestingCancelled(beneficiary, remainingShares, refundShares);
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {

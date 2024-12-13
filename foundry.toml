@@ -7,6 +7,18 @@ solc = "0.8.22"
 src = 'src'
 unchecked_cheatcode_artifacts = true
 viaIR = true
+optimizer = true
+optimizer_runs = 200
+
+[fuzz]
+runs = 100000
+
+[invariant]
+runs = 100000
+depth = 64
+fail_on_revert = true
+
+
 [profile.networks.fuji]
 chain_id = 43113
 rpc_url = "https://api.avax-test.network/ext/bc/C/rpc"

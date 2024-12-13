@@ -15,6 +15,7 @@ contract AuditVestingContractTest is Test {
     address public owner;
     address public vestingManager;
     address public beneficiary;
+    VestingContract implementation;
 
     function setUp() public {
         // Initialize mock contracts
@@ -26,7 +27,8 @@ contract AuditVestingContractTest is Test {
         ggpVaultMock = new GGPVaultMock(ggpTokenMock);
 
         // Deploy VestingContract as a UUPS proxy
-        VestingContract implementation = new VestingContract();
+        implementation = new VestingContract();
+
         address proxy = Upgrades.deployUUPSProxy(
             "VestingContract.sol",
             abi.encodeCall(implementation.initialize, (owner, address(ggpVaultMock), address(ggpTokenMock)))
@@ -86,8 +88,7 @@ contract AuditVestingContractTest is Test {
 
         uint256 releasableShares = vestingContract.getReleasableShares(beneficiary);
 
-        assert(maxReleasableShares < releasableShares);
-
+        assert(maxReleasableShares == releasableShares);
         vm.prank(beneficiary);
         vestingContract.claim();
     }
@@ -129,6 +130,77 @@ contract AuditVestingContractTest is Test {
         vestingContract.cancelVesting(beneficiary);
     }
 
+    function testFuzz_StakeOnBehalfOf(
+        address _beneficiary,
+        uint256 totalAmount,
+        uint256 vestedAmount,
+        uint256 cliffDuration,
+        uint256 intervalDuration,
+        uint256 totalIntervals
+    ) public {
+        // vm.skip(true);
+        vm.assume(_beneficiary != address(0));
+        cliffDuration = bound(cliffDuration, 0, 365 days);
+        intervalDuration = bound(intervalDuration, 1, 365 days);
+        totalIntervals = bound(totalIntervals, 0, 100);
+        vestedAmount = bound(vestedAmount, 0, 1_000_000 ether);
+        totalAmount = bound(totalAmount, 0, 1_000_000 ether);
+
+        vm.startPrank(vestingManager);
+        ggpTokenMock.approve(address(vestingContract), totalAmount);
+
+        // Test vestedAmount <= totalAmount
+        if (totalAmount == 0 || totalIntervals == 0) {
+            vm.expectRevert();
+            vestingContract.stakeOnBehalfOf(
+                _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            );
+            return;
+        }
+
+        if (vestedAmount > totalAmount) {
+            vm.expectRevert("Vested amount cannot exceed total amount");
+            vestingContract.stakeOnBehalfOf(
+                _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            );
+            return;
+        }
+
+        // Test cliffDuration <= intervalDuration * totalIntervals
+        if (cliffDuration > intervalDuration * totalIntervals) {
+            vm.expectRevert("Cliff duration exceeds total vesting period");
+            vestingContract.stakeOnBehalfOf(
+                _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            );
+            return;
+        }
+
+        // Test cliffDuration > 0 implies vestedAmount == 0
+        if (cliffDuration > 0 && vestedAmount > 0) {
+            vm.expectRevert("Vested amount must be zero if cliff duration is specified");
+            vestingContract.stakeOnBehalfOf(
+                _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            );
+            return;
+        }
+
+        // Test cliffDuration == 0 or cliffDuration >= intervalDuration
+        if (cliffDuration > 0 && cliffDuration < intervalDuration) {
+            vm.expectRevert("Cliff duration must be >= interval duration");
+            vestingContract.stakeOnBehalfOf(
+                _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+            );
+            return;
+        }
+        // If all assumptions pass, call the function
+        vestingContract.stakeOnBehalfOf(
+            _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+        );
+        vm.stopPrank();
+
+        // Verify outputs (can vary based on implementation)
+    }
+
     function _vest(address _beneficiary, uint256 totalAmount) internal {
         // uint256 totalAmount = 1_000 ether;
         uint256 vestedAmount = 0 ether;
@@ -144,5 +216,73 @@ contract AuditVestingContractTest is Test {
         vestingContract.stakeOnBehalfOf(
             _beneficiary, totalAmount, vestedAmount, cliffDuration, intervalDuration, totalIntervals
         );
+    }
+
+    function test_ClaimsWithNonZeroVestedAmount() public {
+        uint256 vestedAmount = 1 ether;
+        uint256 cliffDuration = 0;
+        uint256 intervalDuration = 30 days;
+        uint256 totalIntervals = 4;
+
+        // Approve and stake
+        vm.prank(vestingManager);
+        ggpTokenMock.approve(address(vestingContract), 1_000 ether);
+
+        vm.prank(vestingManager);
+        vestingContract.stakeOnBehalfOf(
+            beneficiary, 1_000 ether, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+        );
+
+        vm.prank(beneficiary);
+        vestingContract.claim();
+    }
+
+    function test_CancelsWithNonZeroVestedAmount() public {
+        uint256 vestedAmount = 1 ether;
+        uint256 cliffDuration = 0;
+        uint256 intervalDuration = 30 days;
+        uint256 totalIntervals = 4;
+
+        // Approve and stake
+        vm.prank(vestingManager);
+        ggpTokenMock.approve(address(vestingContract), 1_000 ether);
+        deal(address(ggpTokenMock), address(vestingContract), vestedAmount);
+        vm.prank(vestingManager);
+        vestingContract.stakeOnBehalfOf(
+            beneficiary, 1_000 ether, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+        );
+
+        vestingContract.cancelVesting(beneficiary);
+    }
+
+    function test_RevertsCancelWithNonZeroVestedAmountAndNotEnoughGGPBalance() public {
+        uint256 vestedAmount = 1 ether;
+        uint256 cliffDuration = 0;
+        uint256 intervalDuration = 30 days;
+        uint256 totalIntervals = 4;
+
+        // Approve and stake
+        vm.prank(vestingManager);
+        ggpTokenMock.approve(address(vestingContract), 1_000 ether);
+
+        vm.prank(vestingManager);
+        vestingContract.stakeOnBehalfOf(
+            beneficiary, 1_000 ether, vestedAmount, cliffDuration, intervalDuration, totalIntervals
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC20InsufficientBalance(address,uint256,uint256)")),
+                address(vestingContract),
+                ggpTokenMock.balanceOf(address(vestingContract)),
+                vestedAmount
+            )
+        );
+        vestingContract.cancelVesting(beneficiary);
+    }
+
+    function test_CannotCancelInactiveVestings() public {
+        vm.expectRevert("Vesting not active");
+        vestingContract.cancelVesting(makeAddr("inactiveAccount"));
     }
 }

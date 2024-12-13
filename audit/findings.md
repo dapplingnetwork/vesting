@@ -4,11 +4,10 @@
 
 ## High
 
-### [H-1]. Claimable after Vesting's `endTime` exceeds
+### [H-1]. Beneficiares can claim more tokens than expected.
 
-**Description:** the `VestingContract:claim` does not check whether `Vesting::endTime` expired, then allows the calculation of the allTime `ReleasableShares` of a beneficiary so as to claim `shares` on `GGPVault`.
+**Description:** the `VestingContract:claim` trusts on the calculation of the allTime `ReleasableShares` of a beneficiary so as to claim `shares` on `GGPVault`, calculation that is not constrained to vesting's `endTime`;
 
-- Safety checks only against `isActive` and `cliffTime` states.
 - All time `ReleasableShares` calculation.
 
 ```javascript
