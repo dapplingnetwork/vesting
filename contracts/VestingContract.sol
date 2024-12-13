@@ -37,7 +37,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     }
 
     mapping(address => Vesting) public vestingInfo; // beneficiary -> vesting details
-    uint256 withdrawShares;
+    uint256 public withdrawShares;
 
     IGGPVault public seafiVault; // The vault to deposit/redeem xGGP
     IERC20 public token; // The ERC20 token being deposited
