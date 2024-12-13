@@ -34,7 +34,6 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 cliffTime; // Cliff period
         uint256 vestingIntervals; // Number of intervals (e.g., 16 for 4 years quarterly)
         bool isActive; // Indicates if the vesting is active
-        bool vestAmountClaimed; // Indicates if the vestedAmount was claimed
     }
 
     mapping(address => Vesting) public vestingInfo; // beneficiary -> vesting details
@@ -45,8 +44,7 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
-    event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedShares);
-    event VestingCancelled2(address indexed beneficiary, uint256 remainingShares);
+    event VestingCancelled(address indexed beneficiary, uint256 claimedShares, uint256 refundedShares);
 
     event Withdraw(uint256 assetsWithdrawn);
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -122,14 +120,13 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 releasableShares = getReleasableShares(msg.sender);
         uint256 releasableAssets;
 
-        if (vesting.vestedAmount > 0 && !vesting.vestAmountClaimed) {
+        if (vesting.vestedAmount > 0) {
             uint256 vestedShares = seafiVault.convertToShares(vesting.vestedAmount);
-            vesting.vestAmountClaimed = true; // Mark as claimed
-            releasableAssets = seafiVault.redeem(vestedShares, msg.sender, address(this));
+            releasableShares += vestedShares;
         }
 
         if (releasableShares > 0) {
-            releasableAssets += seafiVault.redeem(releasableShares, msg.sender, address(this));
+            releasableAssets = seafiVault.redeem(releasableShares, msg.sender, address(this));
             vesting.releasedShares += releasableShares;
         }
 
@@ -143,10 +140,9 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 shares = withdrawShares;
         require(shares > 0, "No shares available to withdraw");
 
+        withdrawShares -= shares;
         uint256 assetsWithdrawn = seafiVault.redeem(shares, msg.sender, address(this));
         require(assetsWithdrawn > 0, "Vault redemption failed");
-
-        withdrawShares -= shares;
 
         emit Withdraw(assetsWithdrawn);
     }
@@ -158,15 +154,9 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         vesting.isActive = false;
 
         uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
-        //acrued yield at the time on cancel since the last claim
-        uint256 yield = getReleasableShares(beneficiary);
-        uint256 refundShares = vesting.totalShares + yield;
-        if (vesting.vestAmountClaimed) {
-            refundShares -= seafiVault.convertToShares(vesting.vestedAmount);
-        }
 
-        withdrawShares += refundShares;
-        emit VestingCancelled(beneficiary, remainingShares, refundShares);
+        withdrawShares += remainingShares;
+        emit VestingCancelled(beneficiary, vesting.releasedShares, remainingShares);
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {

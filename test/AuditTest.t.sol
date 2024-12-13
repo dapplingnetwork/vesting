@@ -45,7 +45,7 @@ contract AuditVestingContractTest is Test {
 
     function test_CanClaimEvenWhenVestingEndTimeExceeds() public {
         _vest(beneficiary, 1_000 ether);
-        (,,,, uint256 endTimeAfterClaim,,,,) = vestingContract.vestingInfo(beneficiary);
+        (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
         vm.warp(block.timestamp + endTimeAfterClaim + 1000);
 
         vm.prank(beneficiary);
@@ -54,7 +54,7 @@ contract AuditVestingContractTest is Test {
 
     function test_RevertsIfSeafiVaultReverts() public {
         _vest(beneficiary, 1_000 ether);
-        (,,,,, uint256 cliffTime,,,) = vestingContract.vestingInfo(beneficiary);
+        (,,,,, uint256 cliffTime,,) = vestingContract.vestingInfo(beneficiary);
         vm.warp(block.timestamp + cliffTime);
 
         uint256 releasableShares = vestingContract.getReleasableShares(beneficiary);
@@ -79,7 +79,7 @@ contract AuditVestingContractTest is Test {
         _vest(makeAddr("beneficiary3"), 2_000 ether);
         _vest(makeAddr("beneficiary4"), 2_000 ether);
 
-        (,,,, uint256 endTimeAfterClaim,,,,) = vestingContract.vestingInfo(beneficiary);
+        (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
 
         vm.warp(block.timestamp + endTimeAfterClaim);
         uint256 maxReleasableShares = vestingContract.getReleasableShares(beneficiary);
@@ -95,7 +95,7 @@ contract AuditVestingContractTest is Test {
 
     function test_GetsMaxYieldAfterEndTime() public {
         _vest(beneficiary, 1_000 ether);
-        (,,,, uint256 endTimeAfterClaim,,,,) = vestingContract.vestingInfo(beneficiary);
+        (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
 
         vm.warp(block.timestamp + endTimeAfterClaim);
         uint256 maxReleasableShares = vestingContract.getReleasableShares(beneficiary);
