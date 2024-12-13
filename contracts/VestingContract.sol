@@ -16,8 +16,8 @@ interface IERC20 {
 interface IGGPVault {
     function deposit(uint256 assets, address receiver) external returns (uint256 shares);
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets);
-    function convertToShares(uint256 assets) public view virtual returns (uint256);
-    function convertToAssets(uint256 shares) public view virtual returns (uint256);
+    function convertToShares(uint256 assets) external view returns (uint256);
+    function convertToAssets(uint256 shares) external view returns (uint256);
 }
 
 contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgradeable {
@@ -159,9 +159,9 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
         //acrued yield at the time on cancel since the last claim
-        uint256 yield = getReleasableShares(vesting.beneficiary);
-        uint256 refundShares = vestingInfo.totalShares + yield;
-        if (vestingInfo.vestAmountClaimed) {
+        uint256 yield = getReleasableShares(beneficiary);
+        uint256 refundShares = vesting.totalShares + yield;
+        if (vesting.vestAmountClaimed) {
             refundShares -= seafiVault.convertToShares(vesting.vestedAmount);
         }
 

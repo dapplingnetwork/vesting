@@ -67,7 +67,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(totalShares, totalAmount - vestedAmount, "Incorrect total shares");
@@ -149,7 +149,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(isActive, false, "Vesting should be inactive after cancellation");
@@ -167,7 +167,7 @@ contract VestingContractFullTest is Test {
         );
 
         // Validate the new vesting details
-        (totalShares, releasedShares, actualVestedAmount, startTime, endTime, cliffTime, vestingIntervals, isActive) =
+        (totalShares, releasedShares, actualVestedAmount, startTime, endTime, cliffTime, vestingIntervals, isActive,) =
             vestingContract.vestingInfo(beneficiary);
 
         assertEq(totalShares, totalAmount - vestedAmount, "Incorrect total shares in new vesting");
@@ -221,7 +221,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime1,
             uint256 cliffTime1,
             uint256 vestingIntervals1,
-            bool isActive1
+            bool isActive1,
         ) = vestingContract.vestingInfo(beneficiary1);
 
         assertEq(totalShares1, totalAmount1 - vestedAmount1, "Incorrect total shares for beneficiary1");
@@ -240,7 +240,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime2,
             uint256 cliffTime2,
             uint256 vestingIntervals2,
-            bool isActive2
+            bool isActive2,
         ) = vestingContract.vestingInfo(beneficiary2);
 
         assertEq(totalShares2, totalAmount2 - vestedAmount2, "Incorrect total shares for beneficiary2");
@@ -283,7 +283,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(actualVestedAmount, vestedAmount, "Incorrect initial vested amount");
@@ -312,7 +312,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeAfterClaim,
             uint256 cliffTimeAfterClaim,
             uint256 vestingIntervalsAfterClaim,
-            bool isActiveAfterClaim
+            bool isActiveAfterClaim,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(
@@ -350,7 +350,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(actualVestedAmount, vestedAmount, "Incorrect initial vested amount");
@@ -380,7 +380,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeAfterCliff,
             uint256 cliffTimeAfterCliff,
             uint256 vestingIntervalsAfterCliff,
-            bool isActiveAfterCliff
+            bool isActiveAfterCliff,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(
@@ -418,7 +418,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeAfterNextInterval,
             uint256 cliffTimeAfterNextInterval,
             uint256 vestingIntervalsAfterNextInterval,
-            bool isActiveAfterNextInterval
+            bool isActiveAfterNextInterval,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(
@@ -449,7 +449,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeFinal,
             uint256 cliffTimeFinal,
             uint256 vestingIntervalsFinal,
-            bool isActiveFinal
+            bool isActiveFinal,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedSharesFinal, totalAmount, "All shares should be released at the end of vesting");
@@ -482,7 +482,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(cliffTime, startTime, "Cliff time should match start time with no cliff");
@@ -506,7 +506,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeAfterFirstClaim,
             uint256 cliffTimeAfterFirstClaim,
             uint256 vestingIntervalsAfterFirstClaim,
-            bool isActiveAfterFirstClaim
+            bool isActiveAfterFirstClaim,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(
@@ -537,7 +537,7 @@ contract VestingContractFullTest is Test {
             uint256 endTimeFinal,
             uint256 cliffTimeFinal,
             uint256 vestingIntervalsFinal,
-            bool isActiveFinal
+            bool isActiveFinal,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedSharesFinal, totalAmount, "All shares should be released at the end of vesting");
@@ -604,7 +604,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedShares, expectedSharesAtCliff, "Incorrect released shares after claim at the cliff");
@@ -647,7 +647,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedShares, expectedShares, "Incorrect released shares after claim at the second interval");
@@ -687,7 +687,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
     }
 
@@ -752,7 +752,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedShares, expectedSharesAfterTwoIntervals, "Incorrect released shares after two claims");
@@ -791,7 +791,7 @@ contract VestingContractFullTest is Test {
             uint256 endTime,
             uint256 cliffTime,
             uint256 vestingIntervals,
-            bool isActive
+            bool isActive,
         ) = vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedShares, totalAmount, "All shares should be released after the final claim");
@@ -802,7 +802,7 @@ contract VestingContractFullTest is Test {
         vestingContract.claim();
 
         // Validate that no additional shares were released
-        (totalShares, releasedShares, actualVestedAmount, startTime, endTime, cliffTime, vestingIntervals, isActive) =
+        (totalShares, releasedShares, actualVestedAmount, startTime, endTime, cliffTime, vestingIntervals, isActive,) =
             vestingContract.vestingInfo(beneficiary);
 
         assertEq(releasedShares, totalAmount, "Released shares should not exceed the total amount allocated");
