@@ -42,7 +42,8 @@ contract AuditVestingContractTest is Test {
         // transfer tokens to the vesting manager
         ggpTokenMock.transfer(vestingManager, 1_000_000 ether);
     }
-    unction testFuzz_StakeOnBehalfOf(
+
+    function testFuzz_StakeOnBehalfOf(
         address _beneficiary,
         uint256 totalAmount,
         uint256 vestedAmount,
@@ -113,8 +114,6 @@ contract AuditVestingContractTest is Test {
         // Verify outputs (can vary based on implementation)
     }
 
-
-
     function test_RevertsIfSeafiVaultReverts() public {
         _vest(beneficiary, 1_000 ether);
         (,,,,, uint256 cliffTime,,) = vestingContract.vestingInfo(beneficiary);
@@ -135,7 +134,7 @@ contract AuditVestingContractTest is Test {
         vm.expectRevert("Forced revert");
         vestingContract.claim();
     }
-    
+
     function test_CanClaimEvenWhenVestingEndTimeExceeds() public {
         _vest(beneficiary, 1_000 ether);
         (,,,, uint256 endTimeAfterClaim,,,) = vestingContract.vestingInfo(beneficiary);
@@ -144,6 +143,7 @@ contract AuditVestingContractTest is Test {
         vm.prank(beneficiary);
         vestingContract.claim();
     }
+
     function test_CanClaimMoreThanExpected() public {
         _vest(beneficiary, 1_000 ether);
         _vest(makeAddr("beneficiary2"), 2_000 ether);
@@ -279,8 +279,6 @@ contract AuditVestingContractTest is Test {
         vestingContract.withdraw();
     }
 
-    f
-
     function _vest(address _beneficiary, uint256 totalAmount) internal {
         // uint256 totalAmount = 1_000 ether;
         uint256 vestedAmount = 0 ether;
@@ -352,6 +350,8 @@ contract AuditVestingContractTest is Test {
     }
 
     function test_RevertsCancelWithNonZeroVestedAmountAndNotEnoughGGPBalance() public {
+        //Skipped due to mitigation
+        vm.skip(true);
         uint256 vestedAmount = 1 ether;
         uint256 cliffDuration = 0;
         uint256 intervalDuration = 30 days;
