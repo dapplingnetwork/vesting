@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
+//@audit use a specific solidity version
+
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "forge-std/console.sol";
 
 interface IERC20 {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
@@ -15,10 +16,14 @@ interface IERC20 {
 interface IGGPVault {
     function deposit(uint256 assets, address receiver) external returns (uint256 shares);
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets);
+    function convertToShares(uint256 assets) external view returns (uint256);
+    function convertToAssets(uint256 shares) external view returns (uint256);
 }
 
 contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgradeable {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
+
+    //@q saves single or all time vestings?: Single, once
 
     struct Vesting {
         uint256 totalShares; // xGGP shares deposited in the vault
@@ -32,16 +37,18 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
     }
 
     mapping(address => Vesting) public vestingInfo; // beneficiary -> vesting details
+    uint256 public withdrawShares;
 
     IGGPVault public seafiVault; // The vault to deposit/redeem xGGP
     IERC20 public token; // The ERC20 token being deposited
 
-
     event StakedOnBehalf(address indexed beneficiary, uint256 totalShares, uint256 startTime, uint256 endTime);
     event Claimed(address indexed beneficiary, uint256 assets);
-    event VestingCancelled(address indexed beneficiary, uint256 remainingShares, uint256 refundedAssets);
+    event VestingCancelled(address indexed beneficiary, uint256 claimedShares, uint256 refundedShares);
 
+    event Withdraw(uint256 assetsWithdrawn);
     /// @custom:oz-upgrades-unsafe-allow constructor
+
     constructor() {
         _disableInitializers();
     }
@@ -59,7 +66,6 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         seafiVault = IGGPVault(vault);
         token = IERC20(_token);
-
     }
 
     function stakeOnBehalfOf(
@@ -89,12 +95,11 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 cliffTime = startTime + cliffDuration;
 
         token.transferFrom(msg.sender, address(this), totalAmount);
-
         token.approve(address(seafiVault), totalAmount);
+
         uint256 shares = seafiVault.deposit(totalAmount, address(this));
 
         require(shares > 0, "Vault deposit failed");
-
         vesting.totalShares = shares;
         vesting.vestedAmount = vestedAmount;
         vesting.startTime = startTime;
@@ -105,8 +110,8 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
 
         emit StakedOnBehalf(beneficiary, shares, startTime, endTime);
     }
-
     // Other contract functions remain unchanged...
+
     function claim() external {
         Vesting storage vesting = vestingInfo[msg.sender];
         require(vesting.isActive, "No active vesting");
@@ -116,12 +121,13 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         uint256 releasableAssets;
 
         if (vesting.vestedAmount > 0) {
-            releasableAssets = vesting.vestedAmount;
-            vesting.vestedAmount = 0; // Mark as claimed
+            uint256 vestedShares = seafiVault.convertToShares(vesting.vestedAmount);
+            vesting.vestedAmount = 0;
+            releasableShares += vestedShares;
         }
 
         if (releasableShares > 0) {
-            releasableAssets += seafiVault.redeem(releasableShares, msg.sender, address(this));
+            releasableAssets = seafiVault.redeem(releasableShares, msg.sender, address(this));
             vesting.releasedShares += releasableShares;
         }
 
@@ -130,29 +136,28 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         emit Claimed(msg.sender, releasableAssets);
     }
 
+    // withdraws cumulated shares from canceled Vesting ones.
+    function withdraw() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 shares = withdrawShares;
+        require(shares > 0, "No shares available to withdraw");
+
+        withdrawShares -= shares;
+        uint256 assetsWithdrawn = seafiVault.redeem(shares, msg.sender, address(this));
+        require(assetsWithdrawn > 0, "Vault redemption failed");
+
+        emit Withdraw(assetsWithdrawn);
+    }
+
+    // Schedules the admin's shares to refund
     function cancelVesting(address beneficiary) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Vesting storage vesting = vestingInfo[beneficiary];
         require(vesting.isActive, "Vesting not active");
-
-        uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
-        uint256 vestedAmount = vesting.vestedAmount;
-
-        require(remainingShares > 0 || vestedAmount > 0, "No assets to withdraw");
-
         vesting.isActive = false;
 
-        uint256 refundedAssets = 0;
+        uint256 remainingShares = vesting.totalShares - vesting.releasedShares;
 
-        if (remainingShares > 0) {
-            refundedAssets = seafiVault.redeem(remainingShares, msg.sender, address(this));
-            require(refundedAssets > 0, "Vault redemption failed");
-        }
-
-        if (vestedAmount > 0) {
-            require(token.transfer(msg.sender, vestedAmount), "Vested GGP transfer failed");
-        }
-
-        emit VestingCancelled(beneficiary, remainingShares, refundedAssets + vestedAmount);
+        withdrawShares += remainingShares;
+        emit VestingCancelled(beneficiary, vesting.releasedShares, remainingShares);
     }
 
     function getReleasableShares(address beneficiary) public view returns (uint256) {
@@ -162,11 +167,8 @@ contract VestingContract is Initializable, UUPSUpgradeable, AccessControlUpgrade
         }
 
         uint256 totalTime = vesting.endTime - vesting.startTime;
-        uint256 timeElapsed = block.timestamp - vesting.startTime;
-        uint256 totalIntervals = vesting.vestingIntervals;
-
-        uint256 totalUnlockedShares =
-            (vesting.totalShares * (timeElapsed * totalIntervals / totalTime)) / totalIntervals;
+        uint256 timeElapsed = block.timestamp > vesting.endTime ? totalTime : block.timestamp - vesting.startTime;
+        uint256 totalUnlockedShares = (vesting.totalShares * timeElapsed / totalTime);
         return totalUnlockedShares - vesting.releasedShares;
     }
 
